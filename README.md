@@ -1,46 +1,10 @@
-# yacch — Yet Another Claude Code Harness
+# yacch
 
-yacch (pronounced "yatch") is a Claude Code plugin that wires an orchestrator-mode subagent workflow into your Claude Code sessions. It ships eight specialized subagents, a lifecycle hook set that injects orchestrator reminders on every prompt, and optional private-memory sync against a user-managed git repo. Everything is installed in one shot via `/yacch-setup`.
+yacch (pronounced "yatch") is a Claude Code plugin that wires an orchestrator-mode subagent workflow into your Claude Code sessions. It ships eight specialized subagents, a lifecycle hook set that injects orchestrator reminders on every prompt, and optional private memory sync against a user-managed git repo. Everything is installed in one shot via `/yacch-setup`.
 
----
+## Quickstart
 
-## What you get
-
-- **Orchestrator-mode enforcement.** A `UserPromptSubmit` hook appends a reminder to every prompt pointing Claude at the orchestrator rules file and listing the available agents. The main session acts as a thin dispatcher; substantive work goes to subagents.
-- **Eight subagents** covering the full development loop (see table below).
-- **`/yacch-setup`** — a one-shot command that merges recommended settings into `~/.claude/settings.json` and appends the shared agent-rules block to `~/.claude/CLAUDE.md`.
-- **Optional memory sync.** `SessionStart` / `SessionEnd` hooks pull and push a private git repo when `CLAUDE_MEMORY_DIR` is set. If unset, the hooks no-op silently.
-
-### Subagents
-
-| Agent | Purpose |
-|-------|---------|
-| **planner** | Breaks a high-level goal into an implementation plan and task list |
-| **junior-dev-worktree** | Implements atomic coding tasks (~100 LOC) in an isolated git worktree |
-| **reviewer** | Reviews junior-dev branches for correctness and spec compliance before merging |
-| **build-and-test** | Compiles code, runs tests and benchmarks, reports raw results |
-| **investigator** | Open-ended debugging, profiling, and feasibility studies; returns findings |
-| **refactorer** | Rewrites code for clarity without changing behavior; paired with build-and-test |
-| **test-writer** | Writes tests that pin down current behavior as a refactoring safety net |
-| **gofer** | Lightweight lookups: check dependencies, search docs, verify env state, simple setup tasks (runs on Haiku) |
-
-The orchestrator rules file (`agents/orchestrator-notes.md`) is not an agent — it is the governing spec read by the main session at the start of every conversation.
-
----
-
-## Requirements
-
-- **Claude Code** (any recent version with plugin support)
-- **`jq`** — used by `/yacch-setup`, the session-start advisory script, and `yacch-project`
-- **`git`** — required by worktree-based agents and the memory-sync hooks
-- **`python3`** — used by `/yacch-setup` for portable in-place text replacement in `CLAUDE.md`
-- **Optional: GitHub CLI (`gh`)** — useful for creating the private memory repo
-
----
-
-## Install
-
-### 1. Add the plugin
+### 1. Install the plugin
 
 ```
 /plugin marketplace add github.com/<your-fork>/yacch
@@ -49,31 +13,165 @@ The orchestrator rules file (`agents/orchestrator-notes.md`) is not an agent —
 
 Replace `<your-fork>/yacch` with the URL of the repo you pushed to.
 
-### 2. Run setup
+### 2. (Optional but recommended) Set up a private memory repo
+
+If you want agent memory to persist and sync across sessions, create a private git repo now. You can skip this and add it later.
+
+```bash
+gh repo create my-claude-memory --private
+git clone git@github.com:<you>/my-claude-memory.git ~/claude-memory
+export CLAUDE_MEMORY_DIR=~/claude-memory   # add to your ~/.bashrc or ~/.zshrc
+```
+
+See [Project memory](#project-memory) for how the slot model works.
+
+### 3. Run /yacch-setup
 
 ```
 /yacch-setup
 ```
 
-Setup does the following:
+This applies recommended settings, installs agent rules into `~/.claude/CLAUDE.md`, installs the shell init scripts, and — if `CLAUDE_MEMORY_DIR` is set — adds it to the sandbox write allowlist. As its final action it hardens the sandbox. See [What /yacch-setup does](#what-yacch-setup-does) for the full list.
 
-- **Backs up** `~/.claude/settings.json` (timestamped `.bak.*` file) before touching it.
-- **Merges recommended settings** into `settings.json`. The merge is right-side-wins, meaning your existing values are never overwritten — only missing keys are added.
-- **Backs up** `~/.claude/CLAUDE.md` before modifying it.
-- **Appends the agent-rules snippet** to `~/.claude/CLAUDE.md`, wrapped in `<!-- yacch:rules:start v1 -->` / `<!-- yacch:rules:end -->` markers. If the block is already present at the same version, nothing changes. If an older version is found, it is replaced and a backup is created.
-- **Installs `~/.claude/yacch-shell-init.sh`** — a shell init file providing the `yacch-project` function.
-- **Extends the sandbox write allowlist** — if `CLAUDE_MEMORY_DIR` is set, appends its canonical path to `sandbox.filesystem.allowWrite` in `~/.claude/settings.json`. This is required because macOS resolves symlinks to their canonical targets before applying sandbox write rules; without the allowlist entry, subagent writes through `./.claude/agent-memory/` would be blocked. Takes effect on next Claude Code session restart.
-- **Hardens the sandbox** — as its last write action, sets `sandbox.allowUnsandboxedCommands: false` in `~/.claude/settings.json`. See the [Hardening](#hardening-making-the-sandbox-a-real-wall) section below for what this means and how to re-run setup afterward.
-- **Idempotent** — running `/yacch-setup` again after it has already succeeded is safe, but requires temporarily reverting the hardening first (the preflight check will block you otherwise).
-
-### 3. Add shell init to your rc file
+### 4. Add shell init to your rc file
 
 ```bash
-# In your ~/.bashrc or ~/.zshrc:
+# Add to ~/.bashrc or ~/.zshrc:
 source ~/.claude/yacch-shell-init.sh
 ```
 
-Then reload your shell (`exec $SHELL` or open a new terminal). This provides the `yacch-project` command and sets the recommended `ANTHROPIC_SMALL_FAST_MODEL` environment variable.
+Then reload your shell (`exec $SHELL` or open a new terminal). This provides the `yacch-project` command and exports `ANTHROPIC_SMALL_FAST_MODEL`.
+
+### 5. Restart your Claude Code session
+
+The sandbox and allowlist changes written by `/yacch-setup` take effect only after a session restart. After restarting, orchestrator-mode behavior is active and (if `CLAUDE_MEMORY_DIR` was set) the memory sync hooks are wired up.
+
+### 6. (Optional) Activate a project memory slot
+
+```bash
+cd ~/projects/myproject
+yacch-project myproject
+```
+
+This sets the active memory slot for that directory. See [Project memory](#project-memory) for details.
+
+---
+
+## Requirements
+
+| Requirement | Notes |
+|-------------|-------|
+| **Claude Code** | Any recent version with plugin support |
+| **`jq`** | Used by `/yacch-setup`, `yacch-project`, and the session-start advisory |
+| **`git`** | Required by worktree-based agents and the memory sync hooks |
+| **`python3`** | Used by `/yacch-setup` for portable in-place text replacement in `CLAUDE.md` |
+| **`gh` CLI** | Optional; useful for creating the private memory repo |
+
+---
+
+## What you get
+
+### Agents
+
+Eight subagents cover the full development loop. Each has explicit `model:` and `effort:` frontmatter so subagents don't inherit the orchestrator's effort level. The orchestrator rules file (`agents/orchestrator-notes.md`) is not an agent — it is the governing spec read by the main session at the start of every conversation.
+
+| Agent | Purpose |
+|-------|---------|
+| **planner** | Breaks a high-level goal into a detailed implementation plan and task list |
+| **junior-dev-worktree** | Implements atomic coding tasks (~100 LOC) in an isolated git worktree |
+| **reviewer** | Reviews junior-dev branches for correctness and spec compliance before merging |
+| **build-and-test** | Compiles code, runs tests and benchmarks, and reports raw results |
+| **investigator** | Open-ended debugging, profiling, and feasibility studies; returns findings |
+| **refactorer** | Rewrites code for clarity without changing behavior; paired with build-and-test |
+| **test-writer** | Writes tests that pin down current behavior as a refactoring safety net |
+| **gofer** | Lightweight lookups, dependency checks, simple setup tasks (runs on Haiku) |
+
+### Hooks
+
+| Hook | Trigger | Behavior | Suppress with |
+|------|---------|----------|---------------|
+| `UserPromptSubmit` | Every prompt | Appends an orchestrator-mode reminder pointing at `${CLAUDE_PLUGIN_ROOT}/agents/orchestrator-notes.md` and listing available agents | `export ORCHESTRATOR_MODE=off` |
+| `SessionStart` (1) | Session open | Runs `git pull --rebase` on `$CLAUDE_MEMORY_DIR` if set and valid | Unset `CLAUDE_MEMORY_DIR` |
+| `SessionStart` (2) | Session open | Checks that recommended settings keys are present; warns if any are missing | `export YACCH_QUIET=1` |
+| `SessionEnd` | Session close | Stages all changes, commits with ISO timestamp, and pushes `$CLAUDE_MEMORY_DIR`; warns on push failure but does not block exit | Unset `CLAUDE_MEMORY_DIR` |
+
+---
+
+## What /yacch-setup does
+
+`/yacch-setup` runs five actions in order, with backups before every file modification:
+
+**Action 1 — Patch `~/.claude/settings.json` with recommended values.**
+Merges `sandbox.enabled: true`, `autoDreamEnabled: true`, and `effortLevel: "high"` into the file. The merge is right-side-wins: your existing values are never overwritten, only missing keys are added.
+
+**Action 2 — Idempotently install the agent-rules snippet into `~/.claude/CLAUDE.md`.**
+The block is wrapped in `<!-- yacch:rules:start v1 -->` / `<!-- yacch:rules:end -->` version markers. If the block is already present at the current version, nothing changes. If an older version is found, the block is replaced and a backup is created.
+
+**Action 3 — Install `~/.claude/yacch-use-project.sh` and `~/.claude/yacch-shell-init.sh`.**
+These are overwritten on every run (idempotent by design). After setup you must `source ~/.claude/yacch-shell-init.sh` from your shell rc.
+
+**Action 4 — Add `CLAUDE_MEMORY_DIR` (canonical resolved path) to `sandbox.filesystem.allowWrite[]`.**
+Required because macOS resolves symlinks to their canonical targets before applying sandbox write rules; without this entry, subagent writes through `./.claude/agent-memory/` would be blocked. Skipped if `CLAUDE_MEMORY_DIR` is not set. Takes effect on next session restart.
+
+**Action 5 — Set `sandbox.allowUnsandboxedCommands: false`.**
+Hardens the sandbox so the bypass is disabled. See [Hardening](#hardening-making-the-sandbox-a-real-wall).
+
+`/yacch-setup` is idempotent and safe to re-run, but the preflight check will abort if the sandbox is already hardened (Action 5 from a prior run blocks writes to `~/.claude/settings.json`). See the Hardening section for the unlock procedure.
+
+---
+
+## Project memory
+
+The memory repo is organized into named slots — subdirectories each containing their own `MEMORY.md` and `agent-memory/` directory.
+
+**Layout:**
+```
+$CLAUDE_MEMORY_DIR/
+  default/
+    MEMORY.md
+    agent-memory/
+  myproject/
+    MEMORY.md
+    agent-memory/
+```
+
+When no slot is active for a working directory, the `default/` slot is used.
+
+### Switching the active slot
+
+```bash
+cd ~/projects/myproject
+yacch-project myproject
+```
+
+`yacch-project <slot>` does two things:
+
+1. Writes `autoMemoryDirectory` to `./.claude/settings.local.json` so Claude Code loads memory from `$CLAUDE_MEMORY_DIR/<slot>/` for that directory.
+2. Creates `./.claude/agent-memory` as a symlink to `$CLAUDE_MEMORY_DIR/<slot>/agent-memory/`. Subagent memory writes tagged `memory: project` land inside this symlink and flow through to the private memory repo, where they are picked up by the `SessionStart`/`SessionEnd` sync hooks.
+
+With no argument, the slot defaults to `default`:
+
+```bash
+yacch-project   # → $CLAUDE_MEMORY_DIR/default/
+```
+
+### Notes
+
+- The slot name is independent of the working directory name. Multiple directories can share a slot, or you can repoint a directory to a different slot by re-running `yacch-project <newslot>`.
+- `yacch-project` creates the slot subdirectory and a seed `MEMORY.md` if they do not already exist.
+- The slot setting is stored in `./.claude/settings.local.json`. Commit it to share the slot with teammates, or add it to `.gitignore` to keep it personal.
+
+### Migrating existing agent-memory content
+
+If `./.claude/agent-memory/` already exists as a real directory with content, `yacch-project` will not overwrite it. It prints a warning and the commands to migrate:
+
+```bash
+mv ./.claude/agent-memory/* "$CLAUDE_MEMORY_DIR/<slot>/agent-memory/" \
+  && rmdir ./.claude/agent-memory \
+  && yacch-project <slot>
+```
+
+After the manual move, re-run `yacch-project <slot>` to create the symlink.
 
 ---
 
@@ -83,147 +181,36 @@ Then reload your shell (`exec $SHELL` or open a new terminal). This provides the
 
 ### What this does
 
-By default, `sandbox.allowUnsandboxedCommands` is `true`, which means Claude Code will silently retry any sandbox-blocked command with the sandbox disabled (a "dangerouslyDisableSandbox" bypass). The sandbox is advisory, not enforced.
+By default `sandbox.allowUnsandboxedCommands` is `true`, which means Claude Code silently retries any sandbox-blocked command with the sandbox disabled — the sandbox is advisory, not enforced.
 
-Setting it to `false` makes the sandbox authoritative: if a command is blocked by the sandbox rules, it fails with a hard error instead of silently escaping. There is no auto-retry bypass.
-
-This matters most if you also have `skipDangerousModePermissionPrompt: true`. Without hardening, the combination of that flag and the default `allowUnsandboxedCommands: true` means sandbox failures are retried invisibly, with no prompt and no log — effectively, the sandbox does nothing. Hardening is the only thing that closes that gap.
+Setting it to `false` makes the sandbox authoritative: if a command is blocked by the sandbox rules, it fails with a hard error instead of silently escaping. This matters most when `skipDangerousModePermissionPrompt: true` is also set. Without hardening, that combination means sandbox failures are retried invisibly with no prompt and no log — effectively, the sandbox does nothing.
 
 ### The trade-off
 
-Re-running `/yacch-setup` (for example, after a plugin update) requires temporarily reverting the hardening first, because the setup script writes to `~/.claude/settings.json` — a path that the hardened sandbox blocks.
+Re-running `/yacch-setup` (for example, after a plugin update) requires temporarily reverting the hardening first, because the setup script needs to write to `~/.claude/settings.json` — a path the hardened sandbox blocks.
 
-This same friction applies to any plugin or setup command that needs to write to `~/.claude/`. yacch isn't unique here.
-
-To re-run `/yacch-setup` after it has hardened the sandbox:
+To re-run `/yacch-setup` after hardening:
 
 ```bash
-# 1. From a shell outside Claude Code, OR via /config / /sandbox in Claude Code:
-jq '.sandbox.allowUnsandboxedCommands = true' ~/.claude/settings.json > ~/.claude/settings.json.tmp \
+# 1. From a shell outside Claude Code, or via /config / /sandbox in Claude Code:
+jq '.sandbox.allowUnsandboxedCommands = true' ~/.claude/settings.json \
+  > ~/.claude/settings.json.tmp \
   && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
 
 # 2. Restart your Claude Code session (so the change takes effect).
 
-# 3. Re-run /yacch-setup — it will set the value back to false at the end.
+# 3. Re-run /yacch-setup — it sets the value back to false at the end.
 ```
-
-The `/yacch-setup` preflight will detect the strict state and abort with a clear error message if you forget to do step 1 first.
-
----
-
-## Recommended settings (and why)
-
-`/yacch-setup` applies these defaults if they are not already set:
-
-| Key | Value | Why |
-|-----|-------|-----|
-| `sandbox.enabled` | `true` | Restricts where Bash commands can write; safer default for agent work |
-| `autoDreamEnabled` | `true` | Enables background dream cycles |
-| `effortLevel` | `"high"` | The orchestrator (main session) thinks harder; individual subagents carry their own `effort:` overrides in their frontmatter so they don't all inherit max-effort |
-
-These are recommendations, not hard requirements. `/yacch-setup` leaves your existing values intact.
-
-To suppress the session-start advisory that fires when these keys are missing, set:
-
-```bash
-export YACCH_QUIET=1   # add to .bashrc or .zshrc
-```
-
----
-
-## Optional — private memory repo
-
-The harness ships optional hooks for syncing agent memory across sessions against a private git repo.
-
-### Setup
-
-```bash
-gh repo create my-claude-memory --private
-git clone git@github.com:<you>/my-claude-memory.git ~/claude-memory
-export CLAUDE_MEMORY_DIR=~/claude-memory   # add to .bashrc or .zshrc
-```
-
-### Behavior
-
-Once `CLAUDE_MEMORY_DIR` points to a valid git repo:
-
-- **SessionStart** — runs `git pull --rebase` to pull the latest memory before the session begins.
-- **SessionEnd** — stages all changes (`git add -A`), commits with an ISO timestamp message, and pushes. If the push fails, a warning is printed but the session exit is unaffected.
-
-If `CLAUDE_MEMORY_DIR` is unset or does not point to a git repo, both hooks exit silently. Memory files are plain markdown, keyed by topic. The agent-rules block installed by `/yacch-setup` describes the expected schema for agents that write memory.
-
-When no project slot is active for a working directory, memory is loaded from the `default/` slot (`$CLAUDE_MEMORY_DIR/default/`). See "Project memory: per-slot loading" below for how to switch slots.
-
----
-
-## Project memory: per-slot loading
-
-The memory repo can be sliced into named slots — subdirectories each with their own `MEMORY.md`. This lets different projects (or working contexts) load independent memory without interfering with each other.
-
-### Switching the active slot
-
-```bash
-cd ~/projects/api
-yacch-project api
-```
-
-This writes `autoMemoryDirectory` to `./.claude/settings.local.json`. Subsequent Claude Code sessions launched from that directory will automatically load memory from `$CLAUDE_MEMORY_DIR/api/`.
-
-It also creates `./.claude/agent-memory` as a symlink to `$CLAUDE_MEMORY_DIR/api/agent-memory/`. Subagent memory writes tagged `memory: project` land inside that symlink and therefore flow through to the private memory repo, where they are picked up by the `SessionStart`/`SessionEnd` sync hooks.
-
-### No argument — global default
-
-```bash
-yacch-project   # → $CLAUDE_MEMORY_DIR/default/
-```
-
-Useful for working directories that don't need their own slot, or to reset a directory back to the shared default context.
-
-### Notes
-
-- The slot name is independent of the working directory name. Multiple working dirs can share a slot (`yacch-project api` in both `~/projects/api` and `~/projects/api-v2`), or you can repoint a directory to a different slot later by re-running `yacch-project <newslot>`.
-- `yacch-project` creates the slot subdirectory and a seed `MEMORY.md` if they do not already exist.
-- The slot setting is stored in `./.claude/settings.local.json` — a project-local file. Commit it to your project repo if you want the slot to be shared with teammates, or add it to `.gitignore` if it's personal.
-- The `yacch-project` shell function is provided by `~/.claude/yacch-shell-init.sh`, installed by `/yacch-setup`. Add `source ~/.claude/yacch-shell-init.sh` to your `.bashrc` or `.zshrc`.
-- **Sandbox allowlist.** macOS resolves symlinks before applying sandbox write rules, so subagent writes through the `./.claude/agent-memory/` symlink are checked against the canonical target path (`$CLAUDE_MEMORY_DIR/...`). `/yacch-setup` adds `$CLAUDE_MEMORY_DIR` to `sandbox.filesystem.allowWrite` automatically. This takes effect on the next Claude Code session restart.
-
-### Migrating existing agent-memory content
-
-If `./.claude/agent-memory/` already exists as a real directory with content (e.g., from a prior session before this feature was added), `yacch-project` will NOT overwrite it. It prints a warning and the commands to migrate:
-
-```bash
-mv ./.claude/agent-memory/* "$CLAUDE_MEMORY_DIR/<slot>/agent-memory/" && rmdir ./.claude/agent-memory && yacch-project <slot>
-```
-
-After the manual move, re-run `yacch-project <slot>` to create the symlink.
-
-### Migration tip (prior setup)
-
-If you have existing memory in `~/.claude/memory/<project>/` from an older setup, move those subdirectories into your private memory repo:
-
-```bash
-mv ~/.claude/memory/api/ ~/claude-memory/api/
-```
-
-Then run `yacch-project api` in your project directory to activate the slot.
-
----
-
-## Hooks reference
-
-| Hook | Count | Behavior | Suppress |
-|------|-------|----------|---------|
-| `UserPromptSubmit` | 1 | Injects orchestrator-mode reminder into every prompt | `export ORCHESTRATOR_MODE=off` |
-| `SessionStart` | 2 | (1) Pull memory repo if `CLAUDE_MEMORY_DIR` set; (2) Check recommended settings, warn if any are missing | `YACCH_QUIET=1` suppresses the advisory |
-| `SessionEnd` | 1 | Commit and push memory repo if `CLAUDE_MEMORY_DIR` set | Unset `CLAUDE_MEMORY_DIR` |
 
 ---
 
 ## Customizing
 
-- **Agent model and effort**: each agent file under `agents/` has `model:` and `effort:` frontmatter fields you can edit to tune cost and quality per agent type.
+- **Agent model and effort**: each agent file under `agents/` has `model:` and `effort:` frontmatter fields you can edit to tune cost and quality per agent.
 - **Disable orchestrator mode for a session**: `export ORCHESTRATOR_MODE=off` before starting Claude Code.
-- **Agent-rules versioning**: the block in `~/.claude/CLAUDE.md` is delimited by `<!-- yacch:rules:start v1 -->` and `<!-- yacch:rules:end -->`. If you edit your local copy, a future `/yacch-setup` run will detect the version marker, back up the file, and replace the block with the canonical version from the plugin. To keep local edits, track them separately.
+- **Silence the settings advisory**: `export YACCH_QUIET=1`.
+- **Agent-rules versioning**: the block in `~/.claude/CLAUDE.md` is delimited by `<!-- yacch:rules:start v1 -->` and `<!-- yacch:rules:end -->`. A future `/yacch-setup` run detects the version marker and replaces the block with the canonical version from the plugin. To keep local edits, track them separately.
+- **Telemetry**: `~/.claude/yacch-shell-init.sh` contains a commented-out `export DISABLE_TELEMETRY=1` line. Uncomment it to disable Anthropic telemetry.
 
 ---
 
@@ -236,7 +223,13 @@ Then run `yacch-project api` in your project directory to activate the slot.
 Then manually:
 
 1. Remove the agent-rules block from `~/.claude/CLAUDE.md` — everything between (and including) `<!-- yacch:rules:start ... -->` and `<!-- yacch:rules:end -->`.
-2. If you want to revert settings changes, restore one of the timestamped backups created by `/yacch-setup`:
+2. Optionally restore `~/.claude/settings.json` from a timestamped backup:
    ```bash
    cp ~/.claude/settings.json.bak.<timestamp> ~/.claude/settings.json
    ```
+3. Optionally restore `~/.claude/CLAUDE.md` from a timestamped backup:
+   ```bash
+   cp ~/.claude/CLAUDE.md.bak.<timestamp> ~/.claude/CLAUDE.md
+   ```
+
+Your memory repo is untouched — you own it.
