@@ -63,7 +63,8 @@ Setup does the following:
 - **Appends the agent-rules snippet** to `~/.claude/CLAUDE.md`, wrapped in `<!-- yacch:rules:start v1 -->` / `<!-- yacch:rules:end -->` markers. If the block is already present at the same version, nothing changes. If an older version is found, it is replaced and a backup is created.
 - **Installs `~/.claude/yacch-shell-init.sh`** — a shell init file providing the `yacch-project` function.
 - **Extends the sandbox write allowlist** — if `CLAUDE_MEMORY_DIR` is set, appends its canonical path to `sandbox.filesystem.allowWrite` in `~/.claude/settings.json`. This is required because macOS resolves symlinks to their canonical targets before applying sandbox write rules; without the allowlist entry, subagent writes through `./.claude/agent-memory/` would be blocked. Takes effect on next Claude Code session restart.
-- **Idempotent** — running `/yacch-setup` again after it has already succeeded is safe.
+- **Hardens the sandbox** — as its last write action, sets `sandbox.allowUnsandboxedCommands: false` in `~/.claude/settings.json`. See the [Hardening](#hardening-making-the-sandbox-a-real-wall) section below for what this means and how to re-run setup afterward.
+- **Idempotent** — running `/yacch-setup` again after it has already succeeded is safe, but requires temporarily reverting the hardening first (the preflight check will block you otherwise).
 
 ### 3. Add shell init to your rc file
 
@@ -73,6 +74,40 @@ source ~/.claude/yacch-shell-init.sh
 ```
 
 Then reload your shell (`exec $SHELL` or open a new terminal). This provides the `yacch-project` command and sets the recommended `ANTHROPIC_SMALL_FAST_MODEL` environment variable.
+
+---
+
+## Hardening: making the sandbox a real wall
+
+`/yacch-setup` applies one final write that matters for security: it sets `sandbox.allowUnsandboxedCommands: false` in `~/.claude/settings.json`.
+
+### What this does
+
+By default, `sandbox.allowUnsandboxedCommands` is `true`, which means Claude Code will silently retry any sandbox-blocked command with the sandbox disabled (a "dangerouslyDisableSandbox" bypass). The sandbox is advisory, not enforced.
+
+Setting it to `false` makes the sandbox authoritative: if a command is blocked by the sandbox rules, it fails with a hard error instead of silently escaping. There is no auto-retry bypass.
+
+This matters most if you also have `skipDangerousModePermissionPrompt: true`. Without hardening, the combination of that flag and the default `allowUnsandboxedCommands: true` means sandbox failures are retried invisibly, with no prompt and no log — effectively, the sandbox does nothing. Hardening is the only thing that closes that gap.
+
+### The trade-off
+
+Re-running `/yacch-setup` (for example, after a plugin update) requires temporarily reverting the hardening first, because the setup script writes to `~/.claude/settings.json` — a path that the hardened sandbox blocks.
+
+This same friction applies to any plugin or setup command that needs to write to `~/.claude/`. yacch isn't unique here.
+
+To re-run `/yacch-setup` after it has hardened the sandbox:
+
+```bash
+# 1. From a shell outside Claude Code, OR via /config / /sandbox in Claude Code:
+jq '.sandbox.allowUnsandboxedCommands = true' ~/.claude/settings.json > ~/.claude/settings.json.tmp \
+  && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+
+# 2. Restart your Claude Code session (so the change takes effect).
+
+# 3. Re-run /yacch-setup — it will set the value back to false at the end.
+```
+
+The `/yacch-setup` preflight will detect the strict state and abort with a clear error message if you forget to do step 1 first.
 
 ---
 
