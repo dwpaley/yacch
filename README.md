@@ -33,6 +33,7 @@ The orchestrator rules file (`agents/orchestrator-notes.md`) is not an agent —
 - **Claude Code** (any recent version with plugin support)
 - **`jq`** — used by `/yacch-setup` and the session-start advisory script
 - **`git`** — required by worktree-based agents and the memory-sync hooks
+- **`python3`** — used by `/yacch-setup` for portable in-place text replacement in `CLAUDE.md`
 - **Optional: GitHub CLI (`gh`)** — useful for creating the private memory repo
 
 ---

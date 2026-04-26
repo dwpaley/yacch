@@ -86,11 +86,12 @@ SNIPPET_CONTENT="$(cat "${SNIPPET_FILE}")"
 
 # Extract the version from the snippet's start marker, e.g. "v1"
 SNIPPET_VERSION="$(head -1 "${SNIPPET_FILE}" | grep -oE 'v[0-9]+')"
+[[ -n "${SNIPPET_VERSION}" ]] || die "Could not extract version marker from ${SNIPPET_FILE} (expected first line to contain 'v<N>')"
 
 # Check whether an existing yacch block is present
 if grep -qF '<!-- yacch:rules:start' "${CLAUDE_MD}"; then
     # Extract the installed version marker
-    INSTALLED_VERSION="$(grep -oE '<!-- yacch:rules:start v[0-9]+ -->' "${CLAUDE_MD}" | grep -oE 'v[0-9]+')"
+    INSTALLED_VERSION="$(grep -oE '<!-- yacch:rules:start v[0-9]+ -->' "${CLAUDE_MD}" | grep -oE 'v[0-9]+' | head -1)"
 
     if [[ "${INSTALLED_VERSION}" == "${SNIPPET_VERSION}" ]]; then
         echo "  Agent-rules snippet already installed at this version (${SNIPPET_VERSION}) — nothing to change."

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ \"$ORCHESTRATOR_MODE\" = \"off\" ]; then exit 0; fi; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"[Orchestrator mode] Delegate substantive work to subagents (planner, investigator, junior-dev-worktree, reviewer, build-and-test, refactorer, test-writer, gofer). Do not read source files to understand the codebase or analyze data yourself. Full spec: $CLAUDE_PLUGIN_ROOT/agents/orchestrator-notes.md\"}}'"
+            "command": "command -v jq >/dev/null 2>&1 || exit 0; if [ \"$ORCHESTRATOR_MODE\" = \"off\" ]; then exit 0; fi; jq -n --arg path \"${CLAUDE_PLUGIN_ROOT}/agents/orchestrator-notes.md\" '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:(\"[Orchestrator mode] Delegate substantive work to subagents (planner, investigator, junior-dev-worktree, reviewer, build-and-test, refactorer, test-writer, gofer). Do not read source files to understand the codebase or analyze data yourself. Full spec: \" + $path)}}'"
           }
         ]
       }
