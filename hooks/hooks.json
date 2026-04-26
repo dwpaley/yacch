@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"$ORCHESTRATOR_MODE\" = \"off\" ]; then exit 0; fi; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"[Orchestrator mode] Delegate substantive work to subagents (planner, investigator, junior-dev-worktree, reviewer, build-and-test, refactorer, test-writer, gofer). Do not read source files to understand the codebase or analyze data yourself. Full spec: $CLAUDE_PLUGIN_ROOT/agents/orchestrator-notes.md\"}}'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$CLAUDE_MEMORY_DIR\" ] && [ -d \"$CLAUDE_MEMORY_DIR/.git\" ] && git -C \"$CLAUDE_MEMORY_DIR\" pull --rebase --quiet 2>/dev/null; true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-start-advisory.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/end-session.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
