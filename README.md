@@ -7,11 +7,10 @@ yacch (pronounced "yatch") is a Claude Code plugin that wires an orchestrator-mo
 ### 1. Install the plugin
 
 ```
-/plugin marketplace add github.com/<your-fork>/yacch
+/plugin marketplace add dwpaley/yacch
 /plugin install yacch
+/reload-plugins
 ```
-
-Replace `<your-fork>/yacch` with the URL of the repo you pushed to.
 
 ### 2. (Optional but recommended) Set up a private memory repo
 
@@ -28,7 +27,7 @@ See [Project memory](#project-memory) for how the slot model works.
 ### 3. Run /yacch-setup
 
 ```
-/yacch-setup
+/yacch:yacch-setup
 ```
 
 This applies recommended settings, installs agent rules into `~/.claude/CLAUDE.md`, installs the shell init scripts, and — if `CLAUDE_MEMORY_DIR` is set — adds it to the sandbox write allowlist. As its final action it hardens the sandbox. See [What /yacch-setup does](#what-yacch-setup-does) for the full list.
