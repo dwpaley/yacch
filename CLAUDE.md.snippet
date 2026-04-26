@@ -1,0 +1,62 @@
+<!-- yacch:rules:start v1 -->
+# yacch — Shared Agent Rules
+
+## Domain Knowledge
+
+- Before starting work, check for a project-level `CLAUDE.md` and read the `# Domain Knowledge` section if it exists.
+- If you discover a non-obvious gotcha (a convention that isn't what you'd guess, a surprising API behavior, a compatibility constraint), include a **"Domain note:"** line in your response for the orchestrator to assess.
+- If you read an existing domain note that appears stale or no longer relevant, flag it in your response: **"Stale note:"** with a brief explanation.
+
+## File Editing
+
+- **Prefer Edit over Write** for modifications to existing files, regardless of file size. Edit only outputs the old/new strings, keeping token usage small. Reserve Write for creating new files.
+
+## Escalation — stop improvising, start reporting
+
+**The rule:** when the task as specified cannot be completed by executing the spec, stop and report. Do not improvise.
+
+You are dispatched to execute a plan, not to invent one. The moment you leave the spec and start guessing, your work becomes unreliable and burns context the orchestrator could have spent on a better-targeted re-dispatch. Report what you have, what you tried, and what you think is wrong; let the orchestrator decide the next move.
+
+**Hard triggers — stop when any of these happen:**
+
+1. **Loop detection.** You've tried ≥2 distinct approaches to the same sub-problem and neither worked. The premise is probably wrong; don't try a third.
+2. **Scope drift.** Your next action isn't covered by the spec — you'd be inventing an approach the dispatch didn't authorize.
+3. **Irreconcilable constraints.** Two spec requirements appear to conflict (e.g., "preserve exact values" vs. a quantitative perf target that seems to require approximation). Don't pick one — report the conflict.
+4. **Post-compaction.** If your context was just compacted and you don't recognize your own prior work, STOP. Do not restart from scratch — report state and let the orchestrator decide whether to resume, re-dispatch, or abandon.
+5. **Significant investigation needed.** Unexpected errors, unclear root causes, behavior you can't explain — these are investigator territory, not yours.
+
+**What to report:** status (`complete` / `partial` / `blocked` / `conflict`), what works, what you tried, and your best read on why. Freeform prose is fine; no schema required. Keep it under ~300 words.
+
+## Bash Command Style
+
+Two modes, depending on whether permissions are enforced in the current session. **Default to relaxed mode** — the user typically runs sessions with permissions skipped. Switch to strict mode when dispatching background agents (which hit the allowlist) or when the user indicates permissions are enforced.
+
+### Strict mode (permissions enforced)
+
+Background agents cannot prompt for permission — commands that don't match the allowlist fail silently. Under these conditions, follow strict one-command-per-call style so every command is allowlist-matchable:
+
+1. **One simple command per Bash call.** NEVER chain commands with `&&`, `||`, or `;`. NEVER use inline variable assignment like `VAR=$(cmd) && ...`.
+2. **No subshells or command substitution.** Do not use `$(...)` or backticks. If you need a value, run the command in one Bash call, read the output, then use it in the next.
+3. **No pipes.** Use the dedicated Read/Grep tools instead.
+4. **No stderr redirection.** Do not append `2>&1` or `2>/dev/null`.
+
+### Relaxed mode (permissions skipped)
+
+When permissions are not gating commands, ordinary shell idioms are fine: `&&` chains, `$(...)` substitution, pipes, and stderr redirection may be used where they make the command clearer or shorter. Prefer this mode's ergonomics over the strict mode's ceremony when running interactively.
+
+### Rules that always apply (both modes)
+
+- **Prefer dedicated tools over Bash** — use Read/Grep/Glob/Edit instead of `cat`/`grep`/`find`/`sed`. This is about tool quality, not permissions.
+- **Use absolute paths.** Do not rely on `cd` to set working directory between calls — it doesn't persist reliably across tool invocations.
+- **One call per independent operation.** Even in relaxed mode, don't bundle unrelated commands into one call just to save a tool invocation — it makes failures harder to attribute.
+
+## Git Worktree Isolation
+
+Agents that modify code MUST work in an isolated git worktree:
+
+1. Get a timestamp: run `date +%s`.
+2. Create the worktree: `git -C <repo-root> worktree add <.tmp-path>/worktree-<description>-<timestamp> -b <prefix>/<description>-<timestamp>`
+3. Perform ALL work inside the worktree. NEVER edit files in the main working directory.
+4. When done, commit changes (separate Bash calls for `git add` and `git commit`).
+5. Report back the branch name and worktree path.
+<!-- yacch:rules:end -->

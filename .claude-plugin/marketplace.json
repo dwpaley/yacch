@@ -1,0 +1,13 @@
+{
+  "name": "yacch-marketplace",
+  "owner": {
+    "name": "TBD"
+  },
+  "plugins": [
+    {
+      "name": "yacch",
+      "source": "./",
+      "description": "Yet Another Claude Code Harness."
+    }
+  ]
+}

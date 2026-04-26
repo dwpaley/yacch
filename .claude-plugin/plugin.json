@@ -1,0 +1,5 @@
+{
+  "name": "yacch",
+  "description": "Yet Another Claude Code Harness — orchestrator-mode subagent workflow plus optional private memory sync.",
+  "version": "0.1.0"
+}
