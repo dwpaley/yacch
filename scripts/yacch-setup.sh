@@ -24,6 +24,30 @@ CLAUDE_MD_BACKUP=""
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 command -v jq >/dev/null 2>&1 || die "jq is required but not found. Install it (e.g. conda install jq) and retry."
+
+# Sandbox hardening preflight — must run before any file reads or writes.
+# If sandbox.allowUnsandboxedCommands is already false, the script cannot
+# write to ~/.claude/settings.json and must abort.
+if [[ -f "${SETTINGS_FILE}" ]]; then
+    if jq -e '.sandbox.allowUnsandboxedCommands == false' "${SETTINGS_FILE}" >/dev/null 2>&1; then
+        cat >&2 <<'PREFLIGHT_MSG'
+yacch-setup: cannot proceed — sandbox.allowUnsandboxedCommands is currently false.
+
+The script needs to write to ~/.claude/settings.json, which the sandbox blocks under strict mode.
+
+To re-run yacch-setup:
+  1. Temporarily flip sandbox.allowUnsandboxedCommands back to true. Either:
+       - Edit ~/.claude/settings.json from a shell outside Claude Code, OR
+       - Use Claude Code's /config or /sandbox slash commands to flip it
+  2. Restart your Claude Code session (so the change takes effect)
+  3. Re-run /yacch-setup — it will set the value back to false at the end.
+
+Aborting.
+PREFLIGHT_MSG
+        exit 1
+    fi
+fi
+
 [[ -f "${SNIPPET_FILE}" ]] || die "Snippet file not found: ${SNIPPET_FILE}"
 
 # ---------------------------------------------------------------------------
@@ -219,6 +243,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Action 5 — Harden sandbox
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Action 5: Hardening sandbox ==="
+
+_tmp_harden="$(mktemp "${TMPDIR:-/tmp}/yacch-harden.XXXXXX")"
+jq '.sandbox.allowUnsandboxedCommands = false' "${SETTINGS_FILE}" > "${_tmp_harden}" && mv "${_tmp_harden}" "${SETTINGS_FILE}"
+echo "  Set sandbox.allowUnsandboxedCommands = false"
+echo "  Sandbox is now hardened: silent bypass is disabled."
+echo "  To re-run /yacch-setup later (e.g., after a plugin update), you'll need to temporarily set this back to true. See README \"Hardening\" section."
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
@@ -236,4 +272,5 @@ fi
 if [[ -n "${CLAUDE_MEMORY_DIR:-}" ]] && [[ -n "${_canon_memory_dir:-}" ]]; then
     echo "  Sandbox allowlist : ${_canon_memory_dir} (restart Claude Code to activate)"
 fi
+echo "  Sandbox hardening : sandbox.allowUnsandboxedCommands = false (active now)"
 echo "Done."
