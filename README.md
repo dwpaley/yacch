@@ -62,6 +62,7 @@ Setup does the following:
 - **Backs up** `~/.claude/CLAUDE.md` before modifying it.
 - **Appends the agent-rules snippet** to `~/.claude/CLAUDE.md`, wrapped in `<!-- yacch:rules:start v1 -->` / `<!-- yacch:rules:end -->` markers. If the block is already present at the same version, nothing changes. If an older version is found, it is replaced and a backup is created.
 - **Installs `~/.claude/yacch-shell-init.sh`** — a shell init file providing the `yacch-project` function.
+- **Extends the sandbox write allowlist** — if `CLAUDE_MEMORY_DIR` is set, appends its canonical path to `sandbox.filesystem.allowWrite` in `~/.claude/settings.json`. This is required because macOS resolves symlinks to their canonical targets before applying sandbox write rules; without the allowlist entry, subagent writes through `./.claude/agent-memory/` would be blocked. Takes effect on next Claude Code session restart.
 - **Idempotent** — running `/yacch-setup` again after it has already succeeded is safe.
 
 ### 3. Add shell init to your rc file
@@ -133,6 +134,8 @@ yacch-project api
 
 This writes `autoMemoryDirectory` to `./.claude/settings.local.json`. Subsequent Claude Code sessions launched from that directory will automatically load memory from `$CLAUDE_MEMORY_DIR/api/`.
 
+It also creates `./.claude/agent-memory` as a symlink to `$CLAUDE_MEMORY_DIR/api/agent-memory/`. Subagent memory writes tagged `memory: project` land inside that symlink and therefore flow through to the private memory repo, where they are picked up by the `SessionStart`/`SessionEnd` sync hooks.
+
 ### No argument — global default
 
 ```bash
@@ -147,10 +150,21 @@ Useful for working directories that don't need their own slot, or to reset a dir
 - `yacch-project` creates the slot subdirectory and a seed `MEMORY.md` if they do not already exist.
 - The slot setting is stored in `./.claude/settings.local.json` — a project-local file. Commit it to your project repo if you want the slot to be shared with teammates, or add it to `.gitignore` if it's personal.
 - The `yacch-project` shell function is provided by `~/.claude/yacch-shell-init.sh`, installed by `/yacch-setup`. Add `source ~/.claude/yacch-shell-init.sh` to your `.bashrc` or `.zshrc`.
+- **Sandbox allowlist.** macOS resolves symlinks before applying sandbox write rules, so subagent writes through the `./.claude/agent-memory/` symlink are checked against the canonical target path (`$CLAUDE_MEMORY_DIR/...`). `/yacch-setup` adds `$CLAUDE_MEMORY_DIR` to `sandbox.filesystem.allowWrite` automatically. This takes effect on the next Claude Code session restart.
 
-### Migration tip
+### Migrating existing agent-memory content
 
-If you have existing memory in `~/.claude/memory/<project>/` from a prior setup, move those subdirectories into your private memory repo:
+If `./.claude/agent-memory/` already exists as a real directory with content (e.g., from a prior session before this feature was added), `yacch-project` will NOT overwrite it. It prints a warning and the commands to migrate:
+
+```bash
+mv ./.claude/agent-memory/* "$CLAUDE_MEMORY_DIR/<slot>/agent-memory/" && rmdir ./.claude/agent-memory && yacch-project <slot>
+```
+
+After the manual move, re-run `yacch-project <slot>` to create the symlink.
+
+### Migration tip (prior setup)
+
+If you have existing memory in `~/.claude/memory/<project>/` from an older setup, move those subdirectories into your private memory repo:
 
 ```bash
 mv ~/.claude/memory/api/ ~/claude-memory/api/

@@ -76,6 +76,54 @@ _tmp="$(mktemp "${TMPDIR:-/tmp}/yacch-settings.XXXXXX")"
 jq --arg d "${_target}" '. + {autoMemoryDirectory: $d}' "${_settings_file}" > "${_tmp}" && mv "${_tmp}" "${_settings_file}"
 
 # ---------------------------------------------------------------------------
+# Set up agent-memory symlink
+# ---------------------------------------------------------------------------
+# Create the slot's agent-memory subdir so the symlink target exists.
+_target_agent_mem="${CLAUDE_MEMORY_DIR}/${_slot}/agent-memory"
+mkdir -p "${_target_agent_mem}"
+
+# The symlink we're managing inside the project's .claude/ dir.
+_link="$(pwd)/.claude/agent-memory"
+
+if [[ -L "${_link}" ]]; then
+    # Already a symlink — check where it points.
+    _current_target="$(readlink "${_link}")"
+    if [[ "${_current_target}" == "${_target_agent_mem}" ]]; then
+        # Already pointing at the right place; nothing to do.
+        :
+    else
+        # Points somewhere else — update it.
+        rm "${_link}"
+        ln -s "${_target_agent_mem}" "${_link}"
+        echo "yacch-project: updated agent-memory symlink to point to new slot"
+    fi
+elif [[ ! -e "${_link}" ]]; then
+    # Nothing there (includes broken symlinks, since -e returns false for them).
+    # rm -f is safe here — it's a no-op on truly absent paths.
+    rm -f "${_link}"
+    ln -s "${_target_agent_mem}" "${_link}"
+    echo "yacch-project: agent-memory symlink → ${_target_agent_mem}"
+elif [[ -d "${_link}" ]]; then
+    # It's a real directory. Check if empty.
+    if [[ -z "$(ls -A "${_link}")" ]]; then
+        # Empty — safe to replace.
+        rmdir "${_link}"
+        ln -s "${_target_agent_mem}" "${_link}"
+        echo "yacch-project: agent-memory symlink → ${_target_agent_mem}"
+    else
+        # Non-empty real directory — do NOT clobber; warn and let user migrate.
+        echo "yacch-project: WARNING: ./.claude/agent-memory is a real directory with content:" >&2
+        ls -A "${_link}" | sed 's/^/    /' >&2
+        echo "yacch-project: symlink NOT created. Manually migrate first:" >&2
+        echo "    mv \"${_link}\"/* \"${_target_agent_mem}/\" && rmdir \"${_link}\" && yacch-project ${_slot}" >&2
+        # Continue — settings.local.json was already updated; user can re-run after migration.
+    fi
+else
+    # Something else (regular file, etc.) — warn but don't touch it.
+    echo "yacch-project: WARNING: ./.claude/agent-memory exists and is not a directory or symlink; symlink NOT created." >&2
+fi
+
+# ---------------------------------------------------------------------------
 # Confirm
 # ---------------------------------------------------------------------------
 echo "yacch-project: active slot for $(pwd) → ${_slot} (${_target})"

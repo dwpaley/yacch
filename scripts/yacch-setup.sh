@@ -176,6 +176,49 @@ echo "      source ~/.claude/yacch-shell-init.sh"
 echo "  Then reload your shell. After that, \`yacch-project <slot>\` will be available."
 
 # ---------------------------------------------------------------------------
+# Action 4 — Add CLAUDE_MEMORY_DIR to sandbox write allowlist
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Action 4: Updating sandbox write allowlist ==="
+
+if [[ -z "${CLAUDE_MEMORY_DIR:-}" ]]; then
+    echo "  yacch-setup: CLAUDE_MEMORY_DIR not set — skipping sandbox allowlist update. Re-run /yacch-setup after exporting it." >&2
+else
+    # Resolve to canonical absolute path (handle dir not yet existing with -m / os.path.realpath)
+    if command -v realpath >/dev/null 2>&1 && realpath --version 2>&1 | grep -q GNU; then
+        # GNU realpath supports -m (no requirement for path to exist)
+        _canon_memory_dir="$(realpath -m "${CLAUDE_MEMORY_DIR}")"
+    elif command -v realpath >/dev/null 2>&1; then
+        # BSD realpath (macOS) does not support -m; fall back to python3
+        _canon_memory_dir="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${CLAUDE_MEMORY_DIR}")"
+    elif command -v python3 >/dev/null 2>&1; then
+        _canon_memory_dir="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${CLAUDE_MEMORY_DIR}")"
+    else
+        echo "  ERROR: neither realpath nor python3 found — cannot resolve canonical path for CLAUDE_MEMORY_DIR." >&2
+        _canon_memory_dir=""
+    fi
+
+    if [[ -n "${_canon_memory_dir}" ]]; then
+        # Check if path is already in the allowlist
+        _already_present="$(jq --arg p "${_canon_memory_dir}" \
+            '(.sandbox.filesystem.allowWrite // []) | map(select(. == $p)) | length' \
+            "${SETTINGS_FILE}")"
+
+        if [[ "${_already_present}" -gt 0 ]]; then
+            echo "  already present: ${_canon_memory_dir}"
+        else
+            # Append path (create array if missing), deduplicate
+            _tmp_allow="$(mktemp "${TMPDIR:-/tmp}/yacch-allow.XXXXXX")"
+            jq --arg p "${_canon_memory_dir}" \
+                '.sandbox.filesystem.allowWrite |= (. // [] | . + [$p] | unique)' \
+                "${SETTINGS_FILE}" > "${_tmp_allow}" && mv "${_tmp_allow}" "${SETTINGS_FILE}"
+            echo "  added ${_canon_memory_dir} to sandbox.filesystem.allowWrite"
+            echo "  Note: this change takes effect on next Claude Code session restart."
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
@@ -189,5 +232,8 @@ if [[ -n "${SETTINGS_BACKUP}" ]]; then
 fi
 if [[ -n "${CLAUDE_MD_BACKUP}" ]]; then
     echo "  CLAUDE.md backup: ${CLAUDE_MD_BACKUP}"
+fi
+if [[ -n "${CLAUDE_MEMORY_DIR:-}" ]] && [[ -n "${_canon_memory_dir:-}" ]]; then
+    echo "  Sandbox allowlist : ${_canon_memory_dir} (restart Claude Code to activate)"
 fi
 echo "Done."
