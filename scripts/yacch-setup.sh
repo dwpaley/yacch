@@ -136,12 +136,54 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Action 3 — Install yacch shell init files
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Action 3: Installing yacch shell init ==="
+
+YACCH_USE_PROJECT_DEST="${HOME}/.claude/yacch-use-project.sh"
+YACCH_SHELL_INIT_DEST="${HOME}/.claude/yacch-shell-init.sh"
+
+# Copy use-project.sh into ~/.claude/ for use by the shell function
+cp "${SCRIPT_DIR}/use-project.sh" "${YACCH_USE_PROJECT_DEST}"
+echo "  Installed: ${YACCH_USE_PROJECT_DEST}"
+
+# Write the shell init file (overwrite on every run — idempotent by design)
+cat > "${YACCH_SHELL_INIT_DEST}" <<'SHELLINIT'
+# yacch shell init — source this from your ~/.bashrc or ~/.zshrc
+#
+# Refresh after plugin update by re-running /yacch-setup.
+
+# Recommended fast model for haiku-tagged subagents (lower cost).
+export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5
+
+# Uncomment to disable Anthropic telemetry:
+# export DISABLE_TELEMETRY=1
+
+# Project memory switcher.
+#   yacch-project myslot   # → $CLAUDE_MEMORY_DIR/myslot/
+#   yacch-project          # → $CLAUDE_MEMORY_DIR/default/
+yacch-project() {
+  source "$HOME/.claude/yacch-use-project.sh" "$@"
+}
+SHELLINIT
+echo "  Installed: ${YACCH_SHELL_INIT_DEST}"
+
+echo ""
+echo "  yacch shell init installed at ${YACCH_SHELL_INIT_DEST}"
+echo "  Add this line to your ~/.bashrc or ~/.zshrc:"
+echo "      source ~/.claude/yacch-shell-init.sh"
+echo "  Then reload your shell. After that, \`yacch-project <slot>\` will be available."
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Summary ==="
-echo "  Settings file : ${SETTINGS_FILE}"
-echo "  CLAUDE.md     : ${CLAUDE_MD}"
+echo "  Settings file     : ${SETTINGS_FILE}"
+echo "  CLAUDE.md         : ${CLAUDE_MD}"
+echo "  Shell init        : ${YACCH_SHELL_INIT_DEST}"
+echo "  use-project.sh    : ${YACCH_USE_PROJECT_DEST}"
 if [[ -n "${SETTINGS_BACKUP}" ]]; then
     echo "  Settings backup: ${SETTINGS_BACKUP}"
 fi
